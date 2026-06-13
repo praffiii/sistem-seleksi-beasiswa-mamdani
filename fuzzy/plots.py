@@ -3,6 +3,18 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+plt.rcParams.update(
+    {
+        "axes.titlesize": 11,
+        "axes.labelsize": 9,
+        "axes.edgecolor": "#c8cdd8",
+        "axes.grid": True,
+        "grid.color": "#eef0f5",
+        "font.size": 9,
+        "legend.frameon": False,
+    }
+)
+
 from fuzzy.membership import DOMAINS, INPUT_SETS, trapmf
 
 
