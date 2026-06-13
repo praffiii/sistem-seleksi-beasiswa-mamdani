@@ -161,3 +161,20 @@ def test_trace_carries_all_steps():
     assert set(trace.clip_heights) == {"Rendah", "Sedang", "Tinggi"}
     assert len(trace.xs) == len(trace.agg) == 1001
     assert 0.0 <= trace.score <= 100.0
+
+
+def test_pdf_report_is_nonempty_pdf():
+    from fuzzy.report import build_pdf
+
+    trace = infer(
+        {
+            "IPK": 3.5,
+            "Penghasilan": 2.0,
+            "Tanggungan": 4.0,
+            "Prestasi": 7.0,
+        }
+    )
+    data = build_pdf(trace, applicant_name="Test")
+    assert isinstance(data, (bytes, bytearray))
+    assert data[:4] == b"%PDF"
+    assert len(data) > 1000
