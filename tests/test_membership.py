@@ -1,5 +1,11 @@
+import matplotlib
 import pytest
+
+matplotlib.use("Agg")
+
+from fuzzy.engine import infer
 from fuzzy.membership import trapmf, INPUT_SETS, OUTPUT_SETS, DOMAINS
+from fuzzy.plots import plot_aggregation, plot_membership
 
 
 def test_left_shoulder_flat_at_start():
@@ -40,3 +46,17 @@ def test_params_present_and_shaped():
             assert len(params) == 4
     assert set(OUTPUT_SETS) == {"Rendah", "Sedang", "Tinggi"}
     assert DOMAINS["Prioritas"] == (0, 100)
+
+
+def test_plots_return_figures():
+    trace = infer(
+        {
+            "IPK": 3.5,
+            "Penghasilan": 2.0,
+            "Tanggungan": 4.0,
+            "Prestasi": 7.0,
+        }
+    )
+    figure_aggregation = plot_aggregation(trace)
+    figure_membership = plot_membership("IPK")
+    assert figure_aggregation is not None and figure_membership is not None
