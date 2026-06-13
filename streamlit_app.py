@@ -203,7 +203,77 @@ def render_single_applicant():
 
 
 def render_batch():
-    st.info("Mode Seleksi Batch — diisi pada langkah berikutnya.")
+    st.markdown("**Seleksi Batch**")
+    st.caption(
+        "Unggah CSV dengan kolom: nama, ipk, penghasilan, tanggungan, prestasi"
+    )
+    col_upload, col_quota = st.columns([2, 1])
+    uploaded = col_upload.file_uploader("CSV pelamar", type="csv")
+    quota = col_quota.number_input("Kuota (top-N)", min_value=1, value=3, step=1)
+
+    if uploaded is None:
+        return
+
+    dataframe = pd.read_csv(uploaded)
+    applicants = [
+        {
+            "nama": row["nama"],
+            "IPK": row["ipk"],
+            "Penghasilan": row["penghasilan"],
+            "Tanggungan": row["tanggungan"],
+            "Prestasi": row["prestasi"],
+        }
+        for _, row in dataframe.iterrows()
+    ]
+    ranked = rank_applicants(applicants, RULES)
+    selected_names = {row["nama"] for row in select_top_n(ranked, quota)}
+    table = pd.DataFrame(
+        [
+            {
+                "Rank": row["rank"],
+                "Nama": row["nama"],
+                "Skor": round(row["score"], 2),
+                "Label": row["label"],
+                "Lolos": row["nama"] in selected_names,
+            }
+            for row in ranked
+        ]
+    )
+
+    def highlight_passing(row):
+        tint = "background-color: #e8f5e9" if row["Lolos"] else ""
+        return [tint] * len(row)
+
+    st.dataframe(
+        table.style.apply(highlight_passing, axis=1),
+        use_container_width=True,
+    )
+
+    csv_buffer = io.StringIO()
+    table.to_csv(csv_buffer, index=False)
+    st.download_button(
+        "Unduh Hasil Ranking (CSV)",
+        data=csv_buffer.getvalue(),
+        file_name="hasil_ranking.csv",
+        mime="text/csv",
+    )
+
+    st.divider()
+    st.markdown("**Lihat perhitungan langkah demi langkah:**")
+    names = [row["nama"] for row in ranked]
+    chosen = st.selectbox("Pilih pelamar", names)
+    chosen_row = next(row for row in ranked if row["nama"] == chosen)
+    trace = infer(
+        {
+            "IPK": chosen_row["IPK"],
+            "Penghasilan": chosen_row["Penghasilan"],
+            "Tanggungan": float(chosen_row["Tanggungan"]),
+            "Prestasi": chosen_row["Prestasi"],
+        },
+        RULES,
+    )
+    render_hero(trace)
+    render_walkthrough(trace)
 
 
 render_header()
