@@ -2,3 +2,4 @@ streamlit>=1.40
 numpy>=1.26
 matplotlib>=3.8
 fpdf2>=2.8
+pandas>=2.0
