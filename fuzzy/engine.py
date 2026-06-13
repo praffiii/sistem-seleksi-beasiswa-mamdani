@@ -4,9 +4,13 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from fuzzy.membership import DOMAINS, INPUT_SETS, trapmf
+import numpy as np
+
+from fuzzy.membership import DOMAINS, INPUT_SETS, OUTPUT_SETS, trapmf
 
 INPUT_VARS = ("IPK", "Penghasilan", "Tanggungan", "Prestasi")
+OUTPUT_LO, OUTPUT_HI = DOMAINS["Prioritas"]
+STEP = 0.1
 
 DEFAULT_RULES_PATH = (
     Path(__file__).resolve().parent.parent
@@ -31,6 +35,18 @@ HARD_UPPER = {"IPK"}
 class Rule:
     antecedent: dict
     consequent: str
+
+
+@dataclass
+class Trace:
+    inputs: dict
+    degrees: dict
+    fired: list
+    clip_heights: dict
+    xs: list
+    agg: list
+    score: float
+    label: str
 
 
 def load_rules(path=DEFAULT_RULES_PATH):
@@ -95,3 +111,70 @@ def evaluate_rules(degrees, rules):
         if alpha > 0.0:
             fired.append((alpha, rule.consequent))
     return fired
+
+
+def _clip_heights(fired):
+    """Max firing strength per output label after aggregation."""
+    heights = {label: 0.0 for label in OUTPUT_SETS}
+    for alpha, consequent in fired:
+        if alpha > heights[consequent]:
+            heights[consequent] = alpha
+    return heights
+
+
+def _aggregate(xs, clip_heights):
+    """Aggregate output memberships using MIN implication and MAX."""
+    agg = []
+    for x in xs:
+        value = 0.0
+        for label, params in OUTPUT_SETS.items():
+            clipped = min(clip_heights[label], trapmf(x, params))
+            if clipped > value:
+                value = clipped
+        agg.append(value)
+    return agg
+
+
+def _centroid(xs, agg):
+    xs_array = np.asarray(xs)
+    agg_array = np.asarray(agg)
+    denominator = agg_array.sum()
+    if denominator == 0.0:
+        return float((OUTPUT_LO + OUTPUT_HI) / 2.0)
+    return float((xs_array * agg_array).sum() / denominator)
+
+
+def output_label(score):
+    """Return the output set with highest membership at the crisp score."""
+    best_label, best_degree = "Rendah", -1.0
+    for label, params in OUTPUT_SETS.items():
+        degree = trapmf(score, params)
+        if degree > best_degree:
+            best_label, best_degree = label, degree
+    return best_label
+
+
+def infer(inputs, rules=None):
+    """Run the full Mamdani pipeline for one applicant."""
+    if rules is None:
+        rules = load_rules()
+    clamped = validate_and_clamp(inputs)
+    degrees = fuzzify(clamped)
+    fired = evaluate_rules(degrees, rules)
+    clip_heights = _clip_heights(fired)
+    xs = [
+        round(OUTPUT_LO + index * STEP, 4)
+        for index in range(int((OUTPUT_HI - OUTPUT_LO) / STEP) + 1)
+    ]
+    agg = _aggregate(xs, clip_heights)
+    score = _centroid(xs, agg)
+    return Trace(
+        inputs=clamped,
+        degrees=degrees,
+        fired=fired,
+        clip_heights=clip_heights,
+        xs=xs,
+        agg=agg,
+        score=score,
+        label=output_label(score),
+    )

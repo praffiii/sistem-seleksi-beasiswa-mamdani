@@ -4,6 +4,7 @@ from fuzzy.engine import (
     DEFAULT_RULES_PATH,
     evaluate_rules,
     fuzzify,
+    infer,
     load_rules,
     validate_and_clamp,
 )
@@ -112,3 +113,51 @@ def test_firing_strength_is_min_of_antecedents():
     # Two rules fire (IPK Rendah and IPK Sedang branches), each alpha 0.5.
     assert len(fired) == 2
     assert all(alpha == pytest.approx(0.5) for alpha, _ in fired)
+
+
+def test_infer_high_priority_centroid():
+    trace = infer(
+        {
+            "IPK": 4.0,
+            "Penghasilan": 0.0,
+            "Tanggungan": 6.0,
+            "Prestasi": 10.0,
+        }
+    )
+    assert trace.score == pytest.approx(84.44, abs=0.2)
+    assert trace.label == "Tinggi"
+
+
+def test_infer_low_priority_centroid():
+    # IPK=0 Rendah, income=10 Tinggi, tang=0 Rendah, prestasi=0 Rendah -> Rendah
+    trace = infer(
+        {
+            "IPK": 0.0,
+            "Penghasilan": 10.0,
+            "Tanggungan": 0.0,
+            "Prestasi": 0.0,
+        }
+    )
+    assert trace.score == pytest.approx(15.56, abs=0.2)
+    assert trace.label == "Rendah"
+
+
+def test_trace_carries_all_steps():
+    trace = infer(
+        {
+            "IPK": 3.5,
+            "Penghasilan": 2.0,
+            "Tanggungan": 4.0,
+            "Prestasi": 7.0,
+        }
+    )
+    assert set(trace.degrees) == {
+        "IPK",
+        "Penghasilan",
+        "Tanggungan",
+        "Prestasi",
+    }
+    assert len(trace.fired) >= 1
+    assert set(trace.clip_heights) == {"Rendah", "Sedang", "Tinggi"}
+    assert len(trace.xs) == len(trace.agg) == 1001
+    assert 0.0 <= trace.score <= 100.0
