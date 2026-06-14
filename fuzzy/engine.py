@@ -1,7 +1,7 @@
 """Mamdani inference engine for scholarship priority scoring."""
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +37,14 @@ class Rule:
     consequent: str
 
 
+@dataclass(frozen=True)
+class FiredRule:
+    alpha: float
+    consequent: str
+    antecedent: dict     # {var: label}
+    degrees: dict        # {var: membership degree used for this rule}
+
+
 @dataclass
 class Trace:
     inputs: dict
@@ -47,6 +55,7 @@ class Trace:
     agg: list
     score: float
     label: str
+    fired_detail: list = field(default_factory=list)
 
 
 def load_rules(path=DEFAULT_RULES_PATH):
@@ -113,6 +122,30 @@ def evaluate_rules(degrees, rules):
     return fired
 
 
+def evaluate_rules_detailed(degrees, rules):
+    """Like evaluate_rules but keep each rule's antecedent and degrees.
+
+    Returns [FiredRule] for every rule with alpha > 0, in rule-file order.
+    """
+    fired = []
+    for rule in rules:
+        member = {
+            var: degrees[var][label]
+            for var, label in rule.antecedent.items()
+        }
+        alpha = min(member.values())
+        if alpha > 0.0:
+            fired.append(
+                FiredRule(
+                    alpha=alpha,
+                    consequent=rule.consequent,
+                    antecedent=dict(rule.antecedent),
+                    degrees=member,
+                )
+            )
+    return fired
+
+
 def _clip_heights(fired):
     """Max firing strength per output label after aggregation."""
     heights = {label: 0.0 for label in OUTPUT_SETS}
@@ -160,7 +193,8 @@ def infer(inputs, rules=None):
         rules = load_rules()
     clamped = validate_and_clamp(inputs)
     degrees = fuzzify(clamped)
-    fired = evaluate_rules(degrees, rules)
+    fired_detail = evaluate_rules_detailed(degrees, rules)
+    fired = [(fr.alpha, fr.consequent) for fr in fired_detail]
     clip_heights = _clip_heights(fired)
     xs = [
         round(OUTPUT_LO + index * STEP, 4)
@@ -177,4 +211,5 @@ def infer(inputs, rules=None):
         agg=agg,
         score=score,
         label=output_label(score),
+        fired_detail=fired_detail,
     )
