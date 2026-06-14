@@ -26,6 +26,7 @@ _CSV_COLUMNS = {
     "Prestasi Non-Akademik": "Prestasi",
 }
 _CSV_OUTPUT_COLUMN = "Prioritas Beasiswa"
+_CSV_ID_COLUMN = "Rule"
 
 # Variables whose upper bound is a hard impossibility rather than a fuzzy cap.
 HARD_UPPER = {"IPK"}
@@ -35,6 +36,7 @@ HARD_UPPER = {"IPK"}
 class Rule:
     antecedent: dict
     consequent: str
+    rule_id: str = ""    # original ID from the CSV (e.g. "R52")
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class FiredRule:
     consequent: str
     antecedent: dict     # {var: label}
     degrees: dict        # {var: membership degree used for this rule}
+    rule_id: str = ""    # original ID from the CSV (e.g. "R52")
 
 
 @dataclass
@@ -69,7 +72,14 @@ def load_rules(path=DEFAULT_RULES_PATH):
                 for column, var in _CSV_COLUMNS.items()
             }
             consequent = row[_CSV_OUTPUT_COLUMN].strip()
-            rules.append(Rule(antecedent=antecedent, consequent=consequent))
+            rule_id = row.get(_CSV_ID_COLUMN, "").strip()
+            rules.append(
+                Rule(
+                    antecedent=antecedent,
+                    consequent=consequent,
+                    rule_id=rule_id,
+                )
+            )
     return rules
 
 
@@ -141,6 +151,7 @@ def evaluate_rules_detailed(degrees, rules):
                     consequent=rule.consequent,
                     antecedent=dict(rule.antecedent),
                     degrees=member,
+                    rule_id=rule.rule_id,
                 )
             )
     return fired

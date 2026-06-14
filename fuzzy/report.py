@@ -238,18 +238,19 @@ def _render_inference(pdf, trace):
         pdf,
         "alpha = MIN derajat keanggotaan keempat anteseden. Implikasi "
         "memotong himpunan output pada nilai alpha. Rule diurutkan dari "
-        "alpha terbesar.",
+        "alpha terbesar; ID rule sesuai rule base CSV.",
     )
 
     ordered = sorted(trace.fired_detail, key=lambda fired: -fired.alpha)
-    for number, fired_rule in enumerate(ordered, start=1):
+    for fired_rule in ordered:
         _ensure_space(pdf, 25)
         antecedent = " AND ".join(
             f"{var} {fired_rule.antecedent[var]}" for var in INPUT_VARS
         )
+        label = f"{fired_rule.rule_id}: " if fired_rule.rule_id else ""
         _paragraph(
             pdf,
-            f"Rule {number}: IF {antecedent} "
+            f"{label}IF {antecedent} "
             f"THEN Prioritas {fired_rule.consequent}",
         )
         numbers = ", ".join(

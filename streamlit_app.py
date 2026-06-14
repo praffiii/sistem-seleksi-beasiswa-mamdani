@@ -98,15 +98,13 @@ def render_fuzzification(trace):
         st.divider()
 
 
-TOP_RULES = 6
-
-
 def _render_one_rule(fired_rule):
     antecedent = " AND ".join(
         f"{var} {fired_rule.antecedent[var]}" for var in INPUT_VARS
     )
+    prefix = f"**{fired_rule.rule_id}** — " if fired_rule.rule_id else ""
     st.markdown(
-        f"**IF** {antecedent} **THEN** Prioritas {fired_rule.consequent}"
+        f"{prefix}**IF** {antecedent} **THEN** Prioritas {fired_rule.consequent}"
     )
     numbers = ", ".join(f"{fired_rule.degrees[var]:.2f}" for var in INPUT_VARS)
     st.latex(rf"\alpha = \min({numbers}) = {fired_rule.alpha:.2f}")
@@ -116,15 +114,12 @@ def _render_one_rule(fired_rule):
 def render_inference(trace):
     st.caption(
         "α = MIN derajat keanggotaan keempat anteseden. Implikasi memotong "
-        "himpunan output pada nilai α. Rule diurutkan dari α terbesar."
+        "himpunan output pada nilai α. Rule diurutkan dari α terbesar; "
+        "ID rule sesuai rule base CSV."
     )
     ordered = sorted(trace.fired_detail, key=lambda fr: -fr.alpha)
-    for fired_rule in ordered[:TOP_RULES]:
+    for fired_rule in ordered:
         _render_one_rule(fired_rule)
-    if len(ordered) > TOP_RULES:
-        with st.expander(f"Rule lainnya ({len(ordered) - TOP_RULES})"):
-            for fired_rule in ordered[TOP_RULES:]:
-                _render_one_rule(fired_rule)
     st.markdown("**Implikasi (tinggi potong tiap output):**")
     for label, height in trace.clip_heights.items():
         st.latex(rf"\text{{clip}}_{{\text{{{label}}}}} = {height:.2f}")
