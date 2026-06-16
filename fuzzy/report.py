@@ -19,6 +19,7 @@ MATH_DPI = 220
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
+from fuzzy.derivation import build_defuzzification_derivation
 from fuzzy.engine import INPUT_VARS, load_rules
 from fuzzy.explain import mf_degree_latex
 from fuzzy.membership import INPUT_SETS, OUTPUT_SETS
@@ -138,27 +139,73 @@ def _add_plot(pdf, figure):
     pdf.set_y(y + PLOT_HEIGHT + 3)
 
 
+def _render_defuzzification_table(pdf, trace):
+    widths = [30, 44, 36, 25, 35]
+    headers = ["Output set", "Shape", "z-range", "A", "M"]
+    row_height = 6
+
+    _ensure_space(pdf, row_height * (len(trace.regions) + 2) + 4)
+    pdf.set_font("Helvetica", "B", 8)
+    for header, width in zip(headers, widths):
+        pdf.cell(width, row_height, _safe_text(header), border=1)
+    pdf.ln(row_height)
+
+    pdf.set_font("Helvetica", "", 8)
+    for region in trace.regions:
+        values = [
+            region["output_label"],
+            region["shape"],
+            f"{region['z_start']:.2f}-{region['z_end']:.2f}",
+            f"{region['A']:.2f}",
+            f"{region['M']:.2f}",
+        ]
+        for value, width in zip(values, widths):
+            pdf.cell(width, row_height, _safe_text(value), border=1)
+        pdf.ln(row_height)
+
+    total_area = sum(region["A"] for region in trace.regions)
+    total_moment = sum(region["M"] for region in trace.regions)
+    pdf.set_font("Helvetica", "B", 8)
+    totals = ["Sum", "", "", f"{total_area:.2f}", f"{total_moment:.2f}"]
+    for value, width in zip(totals, widths):
+        pdf.cell(width, row_height, _safe_text(value), border=1)
+    pdf.ln(row_height + 2)
+    return total_area, total_moment
+
+
 def _definition_branches(label, params):
     """Return mathtext-safe lines equivalent to mf_definition_latex()."""
     a, b, c, d = params
     prefix = rf"\mu_{{\mathrm{{{label}}}}}(x)"
     branches = []
-    if a < b:
+    has_rising = a < b
+    has_falling = c < d
+    if has_rising:
+        branches.append(rf"{prefix} = 0,\quad x \leq {_num(a)}")
         branches.append(
             rf"{prefix} = \frac{{x - {_num(a)}}}"
             rf"{{{_num(b)} - {_num(a)}}},\quad "
-            rf"{_num(a)} < x < {_num(b)}"
+            rf"{_num(a)} < x \leq {_num(b)}"
         )
-    branches.append(
-        rf"{prefix} = 1,\quad {_num(b)} \leq x \leq {_num(c)}"
-    )
+    if b < c:
+        if c == d:
+            branches.append(rf"{prefix} = 1,\quad x \geq {_num(b)}")
+        else:
+            branches.append(
+                rf"{prefix} = 1,\quad {_num(b)} \leq x \leq {_num(c)}"
+            )
     if c < d:
         branches.append(
             rf"{prefix} = \frac{{{_num(d)} - x}}"
             rf"{{{_num(d)} - {_num(c)}}},\quad "
-            rf"{_num(c)} < x < {_num(d)}"
+            rf"{_num(c)} < x \leq {_num(d)}"
         )
-    branches.append(rf"{prefix} = 0,\quad \mathrm{{lainnya}}")
+        branches.append(rf"{prefix} = 0,\quad x > {_num(d)}")
+    if has_rising and has_falling:
+        branches = [
+            rf"{prefix} = 0,\quad x \leq {_num(a)}\quad "
+            rf"\mathrm{{atau}}\quad x > {_num(d)}"
+        ] + branches[1:-1]
     return branches
 
 
@@ -270,26 +317,69 @@ def _render_inference(pdf, trace):
 
 
 def _render_defuzzification(pdf, trace):
+    derivation = build_defuzzification_derivation(trace)
     pdf.add_page()
     _heading(pdf, "5-6. Agregasi dan Defuzzifikasi")
     _paragraph(
         pdf,
-        "Agregasi memakai MAX dari himpunan output terpotong; "
-        "defuzzifikasi memakai centroid (sampling step 0.1).",
+        "Defuzzifikasi memakai Composite Moment. Setiap himpunan output "
+        "terpotong dihitung terpisah, sehingga area yang saling tumpang "
+        "tindih tetap ikut dihitung pada masing-masing himpunan.",
     )
     _add_plot(pdf, plot_aggregation(trace))
 
-    numerator = sum(x * mu for x, mu in zip(trace.xs, trace.agg))
-    denominator = sum(trace.agg)
-    _add_math(
-        pdf,
-        r"Z = \frac{\sum x_i\,\mu(x_i)}{\sum \mu(x_i)}",
-    )
-    _add_math(
-        pdf,
-        rf"Z = \frac{{{numerator:.1f}}}{{{denominator:.1f}}}"
-        rf" = {trace.score:.2f}",
-    )
+    _heading(pdf, "1. Komposisi MAX per output set", level=2)
+    for composition in derivation["compositions"]:
+        if not composition["active"]:
+            _paragraph(
+                pdf,
+                f"{composition['label']}: mu = 0, tidak ada area fuzzy "
+                "dan tidak ikut diperhitungkan dalam defuzzifikasi.",
+            )
+            continue
+        _paragraph(
+            pdf,
+            f"{composition['label']}: " + ", ".join(composition["rules_text"]),
+        )
+        _add_math(pdf, composition["max_latex"])
+
+    _heading(pdf, "2. Pencarian titik potong", level=2)
+    for cut_group in derivation["cut_points"]:
+        _paragraph(pdf, cut_group["label"])
+        for edge in cut_group["edges"]:
+            _paragraph(pdf, edge["edge_label"])
+            _add_math(pdf, edge["expression_latex"])
+            _add_math(pdf, edge["equation_latex"])
+
+    _heading(pdf, "3. Fungsi hasil komposisi", level=2)
+    for function_group in derivation["functions"]:
+        _paragraph(pdf, function_group["label"])
+        for line in function_group["lines"]:
+            _add_math(pdf, line)
+
+    _heading(pdf, "4. Daftar region defuzzifikasi", level=2)
+    for region in derivation["regions"]:
+        _paragraph(pdf, region["list_label"])
+
+    _render_defuzzification_table(pdf, trace)
+
+    _heading(pdf, "5. Momen tiap region", level=2)
+    for region in derivation["regions"]:
+        _paragraph(pdf, f"{region['moment']['symbol']} - {region['title']}")
+        _add_math(pdf, region["moment"]["setup_latex"])
+        _add_math(pdf, region["moment"]["antiderivative_latex"])
+        _add_math(pdf, region["moment"]["upper_latex"])
+        _add_math(pdf, region["moment"]["lower_latex"])
+        _add_math(pdf, region["moment"]["result_latex"])
+
+    _heading(pdf, "6. Luas tiap region", level=2)
+    for region in derivation["regions"]:
+        _add_math(pdf, region["area_latex"])
+
+    _heading(pdf, "7. Nilai crisp", level=2)
+    _add_math(pdf, derivation["moment_sum_latex"])
+    _add_math(pdf, derivation["area_sum_latex"])
+    _add_math(pdf, derivation["crisp_latex"])
 
     _heading(pdf, "Penentuan label", level=2)
     label_latex, _ = mf_degree_latex(

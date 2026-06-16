@@ -1,5 +1,6 @@
 import pytest
 
+from fuzzy.derivation import build_defuzzification_derivation
 from fuzzy.engine import (
     DEFAULT_RULES_PATH,
     evaluate_rules,
@@ -115,7 +116,7 @@ def test_firing_strength_is_min_of_antecedents():
     assert all(alpha == pytest.approx(0.5) for alpha, _ in fired)
 
 
-def test_infer_high_priority_centroid():
+def test_infer_high_priority_composite_moment():
     trace = infer(
         {
             "IPK": 4.0,
@@ -128,7 +129,7 @@ def test_infer_high_priority_centroid():
     assert trace.label == "Tinggi"
 
 
-def test_infer_low_priority_centroid():
+def test_infer_low_priority_composite_moment():
     # IPK=0 Rendah, income=10 Tinggi, tang=0 Rendah, prestasi=0 Rendah -> Rendah
     trace = infer(
         {
@@ -140,6 +141,94 @@ def test_infer_low_priority_centroid():
     )
     assert trace.score == pytest.approx(15.56, abs=0.2)
     assert trace.label == "Rendah"
+
+
+def test_reference_case_composite_moment_regions():
+    trace = infer(
+        {
+            "IPK": 3.20,
+            "Penghasilan": 4.0,
+            "Tanggungan": 4.0,
+            "Prestasi": 7.0,
+        }
+    )
+
+    assert trace.score == pytest.approx(64.17, abs=0.01)
+    assert trace.clip_heights["Sedang"] == pytest.approx(0.5)
+    assert trace.clip_heights["Tinggi"] == pytest.approx(0.5)
+    assert trace.clip_heights["Rendah"] == pytest.approx(0.0)
+    assert len(trace.regions) == 5
+
+    expected = [
+        ("Sedang", "Rising triangle", 20.0, 35.0, 3.75, 112.50),
+        ("Sedang", "Plateau rectangle", 35.0, 65.0, 15.00, 750.00),
+        ("Sedang", "Falling triangle", 65.0, 80.0, 3.75, 262.50),
+        ("Tinggi", "Rising triangle", 60.0, 70.0, 2.50, 166.67),
+        ("Tinggi", "Plateau rectangle", 70.0, 100.0, 15.00, 1275.00),
+    ]
+    for region, expected_region in zip(trace.regions, expected):
+        output_label, shape, z_start, z_end, area, moment = expected_region
+        assert region["output_label"] == output_label
+        assert region["shape"] == shape
+        assert region["z_start"] == pytest.approx(z_start, abs=0.01)
+        assert region["z_end"] == pytest.approx(z_end, abs=0.01)
+        assert region["A"] == pytest.approx(area, abs=0.01)
+        assert region["M"] == pytest.approx(moment, abs=0.01)
+
+    assert sum(region["A"] for region in trace.regions) == pytest.approx(40.00)
+    assert sum(region["M"] for region in trace.regions) == pytest.approx(
+        2566.67,
+        abs=0.01,
+    )
+
+
+def test_reference_case_derivation_cut_points_and_bounds():
+    trace = infer(
+        {
+            "IPK": 3.20,
+            "Penghasilan": 4.0,
+            "Tanggungan": 4.0,
+            "Prestasi": 7.0,
+        }
+    )
+    derivation = build_defuzzification_derivation(trace)
+
+    cuts = {
+        (group["label"], edge["edge"]): edge["z"]
+        for group in derivation["cut_points"]
+        for edge in group["edges"]
+    }
+    assert cuts[("Sedang", "rising")] == pytest.approx(35.0)
+    assert cuts[("Sedang", "falling")] == pytest.approx(65.0)
+    assert cuts[("Tinggi", "rising")] == pytest.approx(70.0)
+    assert ("Tinggi", "falling") not in cuts
+
+    expected_bounds = [
+        (68.06, -44.44),
+        (1056.25, 306.25),
+        (2844.44, 2581.94),
+        (-1633.33, -1800.00),
+        (2500.00, 1225.00),
+    ]
+    for region, (upper, lower) in zip(derivation["regions"], expected_bounds):
+        assert region["moment"]["upper_eval"] == pytest.approx(upper, abs=0.01)
+        assert region["moment"]["lower_eval"] == pytest.approx(lower, abs=0.01)
+
+    assert [region["list_label"] for region in derivation["regions"]] == [
+        "A1 = Segitiga naik Sedang (z = 20 hingga z = 35)",
+        "A2 = Persegi panjang datar Sedang (z = 35 hingga z = 65)",
+        "A3 = Segitiga turun Sedang (z = 65 hingga z = 80)",
+        "A4 = Segitiga naik Tinggi (z = 60 hingga z = 70)",
+        "A5 = Persegi panjang datar Tinggi (z = 70 hingga z = 100)",
+    ]
+
+    assert "112.50 + 750.00 + 262.50 + 166.67 + 1275.00" in derivation[
+        "moment_sum_latex"
+    ]
+    assert "3.75 + 15.00 + 3.75 + 2.50 + 15.00" in derivation[
+        "area_sum_latex"
+    ]
+    assert derivation["crisp_latex"].endswith("= 64.17")
 
 
 def test_trace_carries_all_steps():
@@ -159,7 +248,9 @@ def test_trace_carries_all_steps():
     }
     assert len(trace.fired) >= 1
     assert set(trace.clip_heights) == {"Rendah", "Sedang", "Tinggi"}
-    assert len(trace.xs) == len(trace.agg) == 1001
+    assert len(trace.xs) == 1001
+    assert trace.agg == []
+    assert len(trace.regions) >= 1
     assert 0.0 <= trace.score <= 100.0
 
 

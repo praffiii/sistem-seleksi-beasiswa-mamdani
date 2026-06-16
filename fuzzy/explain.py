@@ -45,21 +45,32 @@ def mf_definition_latex(label, params):
     """Full piecewise definition of one fuzzy set as a LaTeX cases block."""
     a, b, c, d = params
     rows = []
-    if a < b:
+    has_rising = a < b
+    has_falling = c < d
+    if has_rising:
+        rows.append(("0", rf"x \le {_num(a)}"))
         rows.append(
             (
                 rf"\frac{{x - {_num(a)}}}{{{_num(b)} - {_num(a)}}}",
-                rf"{_num(a)} < x < {_num(b)}",
+                rf"{_num(a)} < x \le {_num(b)}",
             )
         )
-    rows.append(("1", rf"{_num(b)} \le x \le {_num(c)}"))
+    if b < c:
+        if c == d:
+            rows.append(("1", rf"x \ge {_num(b)}"))
+        else:
+            rows.append(("1", rf"{_num(b)} \le x \le {_num(c)}"))
     if c < d:
         rows.append(
             (
                 rf"\frac{{{_num(d)} - x}}{{{_num(d)} - {_num(c)}}}",
-                rf"{_num(c)} < x < {_num(d)}",
+                rf"{_num(c)} < x \le {_num(d)}",
             )
         )
-    rows.append(("0", r"\text{lainnya}"))
-    body = r" \\ ".join(rf"{expr} & {cond}" for expr, cond in rows)
+        rows.append(("0", rf"x > {_num(d)}"))
+    if has_rising and has_falling:
+        rows = [
+            ("0", rf"x \le {_num(a)} \quad \text{{atau}} \quad x > {_num(d)}")
+        ] + rows[1:-1]
+    body = r" \\ ".join(rf"{expr}, & {cond}" for expr, cond in rows)
     return rf"\mu_{{\text{{{label}}}}}(x) = \begin{{cases}} {body} \end{{cases}}"

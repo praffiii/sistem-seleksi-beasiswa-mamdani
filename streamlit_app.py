@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from fuzzy.engine import INPUT_VARS, infer, load_rules
+from fuzzy.derivation import build_defuzzification_derivation
 from fuzzy.explain import mf_definition_latex, mf_degree_latex
 from fuzzy.membership import INPUT_SETS, OUTPUT_SETS
 from fuzzy.plots import plot_aggregation, plot_membership
@@ -84,17 +85,17 @@ def render_fuzzification(trace):
         x = trace.inputs[var]
         unit = VAR_UNITS[var]
         st.subheader(f"{var} = {x:g} {unit}".strip())
-        col_formula, col_plot = st.columns(2)
-        with col_formula:
+        st.pyplot(plot_membership(var, value=x, degrees=trace.degrees[var]))
+        col_definition, col_degree = st.columns(2)
+        with col_definition:
             st.markdown("**Definisi himpunan:**")
             for label, params in INPUT_SETS[var].items():
                 st.latex(mf_definition_latex(label, params))
+        with col_degree:
             st.markdown("**Hasil fuzzifikasi:**")
             for label, params in INPUT_SETS[var].items():
                 latex, _ = mf_degree_latex(label, params, x)
                 st.latex(latex)
-        with col_plot:
-            st.pyplot(plot_membership(var, value=x, degrees=trace.degrees[var]))
         st.divider()
 
 
@@ -126,18 +127,92 @@ def render_inference(trace):
 
 
 def render_defuzzification(trace):
+    derivation = build_defuzzification_derivation(trace)
     st.caption(
-        "Agregasi memakai MAX dari himpunan output terpotong; defuzzifikasi "
-        "memakai centroid (sampling step 0.1)."
+        "Defuzzifikasi memakai Composite Moment: tiap himpunan output "
+        "terpotong dihitung terpisah, termasuk area yang saling tumpang tindih."
     )
     st.pyplot(plot_aggregation(trace))
-    numerator = sum(x * mu for x, mu in zip(trace.xs, trace.agg))
-    denominator = sum(trace.agg)
-    st.latex(r"Z = \frac{\sum x_i\,\mu(x_i)}{\sum \mu(x_i)}")
-    st.latex(
-        rf"Z = \frac{{{numerator:.1f}}}{{{denominator:.1f}}} "
-        rf"= {trace.score:.2f}"
+
+    st.subheader("1. Komposisi MAX per output set")
+    for composition in derivation["compositions"]:
+        if not composition["active"]:
+            st.markdown(
+                f"**{composition['label']}**: μ = 0, tidak ada area fuzzy "
+                "dan tidak ikut diperhitungkan dalam defuzzifikasi."
+            )
+            continue
+        st.markdown(
+            f"**{composition['label']}**: "
+            + ", ".join(composition["rules_text"])
+        )
+        st.latex(composition["max_latex"])
+
+    st.subheader("2. Pencarian titik potong")
+    for cut_group in derivation["cut_points"]:
+        with st.expander(cut_group["label"], expanded=True):
+            for edge in cut_group["edges"]:
+                st.markdown(f"**{edge['edge_label']}**")
+                st.latex(edge["expression_latex"])
+                st.latex(edge["equation_latex"])
+
+    st.subheader("3. Fungsi hasil komposisi")
+    for function_group in derivation["functions"]:
+        with st.expander(function_group["label"], expanded=True):
+            for line in function_group["lines"]:
+                st.latex(line)
+
+    st.subheader("4. Daftar region defuzzifikasi")
+    for region in derivation["regions"]:
+        st.markdown(region["list_label"])
+
+    rows = [
+        {
+            "Output set": region["output_label"],
+            "Shape": region["shape"],
+            "z-range": f"{region['z_start']:.2f}-{region['z_end']:.2f}",
+            "A": region["A"],
+            "M": region["M"],
+        }
+        for region in trace.regions
+    ]
+    total_area = sum(region["A"] for region in trace.regions)
+    total_moment = sum(region["M"] for region in trace.regions)
+    rows.append(
+        {
+            "Output set": "Σ",
+            "Shape": "",
+            "z-range": "",
+            "A": total_area,
+            "M": total_moment,
+        }
     )
+    st.dataframe(
+        pd.DataFrame(rows).style.format({"A": "{:.2f}", "M": "{:.2f}"}),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("5. Momen tiap region")
+    for region in derivation["regions"]:
+        with st.expander(
+            f"{region['moment']['symbol']} - {region['title']}",
+            expanded=True,
+        ):
+            st.latex(region["moment"]["setup_latex"])
+            st.latex(region["moment"]["antiderivative_latex"])
+            st.latex(region["moment"]["upper_latex"])
+            st.latex(region["moment"]["lower_latex"])
+            st.latex(region["moment"]["result_latex"])
+
+    st.subheader("6. Luas tiap region")
+    for region in derivation["regions"]:
+        st.latex(region["area_latex"])
+
+    st.subheader("7. Nilai crisp")
+    st.latex(derivation["moment_sum_latex"])
+    st.latex(derivation["area_sum_latex"])
+    st.latex(derivation["crisp_latex"])
     st.markdown("**Penentuan label:**")
     label_latex, _ = mf_degree_latex(
         trace.label, OUTPUT_SETS[trace.label], trace.score

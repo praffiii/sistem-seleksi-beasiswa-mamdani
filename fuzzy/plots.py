@@ -15,7 +15,7 @@ plt.rcParams.update(
     }
 )
 
-from fuzzy.membership import DOMAINS, INPUT_SETS, trapmf
+from fuzzy.membership import DOMAINS, INPUT_SETS, OUTPUT_SETS, trapmf
 
 
 def plot_membership(var, value=None, degrees=None):
@@ -56,17 +56,23 @@ def plot_membership(var, value=None, degrees=None):
 
 
 def plot_aggregation(trace):
-    """Plot the aggregated output area and mark the centroid score."""
+    """Plot each clipped output set and mark the Composite Moment score."""
     figure, axis = plt.subplots(figsize=(5, 2.5))
-    axis.fill_between(trace.xs, trace.agg, alpha=0.4)
-    axis.plot(trace.xs, trace.agg)
+    xs = trace.xs if trace.xs else np.linspace(*DOMAINS["Prioritas"], 500)
+    for label, params in OUTPUT_SETS.items():
+        height = trace.clip_heights.get(label, 0.0)
+        if height <= 0.0:
+            continue
+        clipped = [min(height, trapmf(x, params)) for x in xs]
+        axis.fill_between(xs, clipped, alpha=0.28, label=f"{label} ({height:.2f})")
+        axis.plot(xs, clipped, linewidth=1.2)
     axis.axvline(
         trace.score,
         color="red",
         linestyle="--",
         label=f"score = {trace.score:.1f}",
     )
-    axis.set_title("Aggregated output & centroid")
+    axis.set_title("Clipped output sets & Composite Moment")
     axis.set_xlim(*DOMAINS["Prioritas"])
     axis.set_ylim(-0.05, 1.05)
     axis.set_xlabel("Prioritas Beasiswa")

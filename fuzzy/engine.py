@@ -4,8 +4,6 @@ import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import numpy as np
-
 from fuzzy.membership import DOMAINS, INPUT_SETS, OUTPUT_SETS, trapmf
 
 INPUT_VARS = ("IPK", "Penghasilan", "Tanggungan", "Prestasi")
@@ -58,6 +56,7 @@ class Trace:
     agg: list
     score: float
     label: str
+    regions: list = field(default_factory=list)
     fired_detail: list = field(default_factory=list)
 
 
@@ -166,26 +165,188 @@ def _clip_heights(fired):
     return heights
 
 
-def _aggregate(xs, clip_heights):
-    """Aggregate output memberships using MIN implication and MAX."""
-    agg = []
-    for x in xs:
-        value = 0.0
-        for label, params in OUTPUT_SETS.items():
-            clipped = min(clip_heights[label], trapmf(x, params))
-            if clipped > value:
-                value = clipped
-        agg.append(value)
-    return agg
+def _format_num(value):
+    return f"{value:.2f}"
 
 
-def _centroid(xs, agg):
-    xs_array = np.asarray(xs)
-    agg_array = np.asarray(agg)
-    denominator = agg_array.sum()
-    if denominator == 0.0:
-        return float((OUTPUT_LO + OUTPUT_HI) / 2.0)
-    return float((xs_array * agg_array).sum() / denominator)
+def _compact_num(value):
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+    return _format_num(value)
+
+
+def _poly_eval(coefficients, z):
+    return sum(coefficient * z ** power for power, coefficient in coefficients)
+
+
+def _antiderivative_text(coefficients):
+    terms = []
+    for power, coefficient in coefficients:
+        if abs(coefficient) < 1e-12:
+            continue
+        sign = "-" if coefficient < 0 else "+"
+        absolute = abs(coefficient)
+        if power == 2:
+            term = f"{_format_num(absolute)}z^2"
+        elif power == 3:
+            term = f"{_format_num(absolute)}z^3"
+        else:
+            term = f"{_format_num(absolute)}z^{power}"
+        terms.append((sign, term))
+    if not terms:
+        return "0"
+    first_sign, first_term = terms[0]
+    text = f"-{first_term}" if first_sign == "-" else first_term
+    for sign, term in terms[1:]:
+        text += f" {sign} {term}"
+    return text
+
+
+def _region_formula_details(mu_text, coefficients, z_start, z_end):
+    upper = _poly_eval(coefficients, z_end)
+    lower = _poly_eval(coefficients, z_start)
+    return {
+        "mu_text": mu_text,
+        "antiderivative_coefficients": coefficients,
+        "antiderivative_text": _antiderivative_text(coefficients),
+        "upper_eval": upper,
+        "lower_eval": lower,
+    }
+
+
+def _triangle_region(
+    output_label_name,
+    shape,
+    z_start,
+    z_end,
+    height,
+    moment,
+    mu_text,
+    mu_latex,
+    coefficients,
+):
+    area = 0.5 * (z_end - z_start) * height
+    region = {
+        "output_label": output_label_name,
+        "shape": shape,
+        "z_start": z_start,
+        "z_end": z_end,
+        "A": area,
+        "M": moment,
+        "area_formula": "triangle",
+        "base": z_end - z_start,
+        "height": height,
+        "mu_latex": mu_latex,
+    }
+    region.update(_region_formula_details(mu_text, coefficients, z_start, z_end))
+    return region
+
+
+def _rectangle_region(output_label_name, z_start, z_end, height):
+    area = (z_end - z_start) * height
+    moment = height * (z_end ** 2 - z_start ** 2) / 2.0
+    coefficients = [(2, height / 2.0)]
+    region = {
+        "output_label": output_label_name,
+        "shape": "Plateau rectangle",
+        "z_start": z_start,
+        "z_end": z_end,
+        "A": area,
+        "M": moment,
+        "area_formula": "rectangle",
+        "base": z_end - z_start,
+        "height": height,
+    }
+    region.update(
+        _region_formula_details(
+            _format_num(height),
+            coefficients,
+            z_start,
+            z_end,
+        )
+    )
+    region["mu_latex"] = _format_num(height)
+    return region
+
+
+def _composite_moment(clip_heights):
+    """Return crisp score and independent clipped output sub-regions.
+
+    Composite Moment integrates every clipped output set independently, so
+    overlaps intentionally contribute once per fired output label.
+    """
+    regions = []
+    for output_label_name, height in clip_heights.items():
+        if height <= 0.0:
+            continue
+
+        a, b, c, d = OUTPUT_SETS[output_label_name]
+        z_left = a + height * (b - a)
+        z_right = d - height * (d - c)
+
+        if a < b:
+            denominator = b - a
+            coefficients = [
+                (3, 1.0 / (3.0 * denominator)),
+                (2, -a / (2.0 * denominator)),
+            ]
+            moment = (
+                (z_left ** 3 / 3.0 - a * z_left ** 2 / 2.0)
+                - (a ** 3 / 3.0 - a * a ** 2 / 2.0)
+            ) / denominator
+            regions.append(
+                _triangle_region(
+                    output_label_name,
+                    "Rising triangle",
+                    a,
+                    z_left,
+                    height,
+                    moment,
+                    f"(z - {_format_num(a)}) / {_format_num(denominator)}",
+                    rf"\frac{{z - {_compact_num(a)}}}{{{_compact_num(denominator)}}}",
+                    coefficients,
+                )
+            )
+
+        if z_left < z_right:
+            regions.append(
+                _rectangle_region(
+                    output_label_name,
+                    z_left,
+                    z_right,
+                    height,
+                )
+            )
+
+        if c < d:
+            denominator = d - c
+            coefficients = [
+                (2, d / (2.0 * denominator)),
+                (3, -1.0 / (3.0 * denominator)),
+            ]
+            moment = (
+                (d * d ** 2 / 2.0 - d ** 3 / 3.0)
+                - (d * z_right ** 2 / 2.0 - z_right ** 3 / 3.0)
+            ) / denominator
+            regions.append(
+                _triangle_region(
+                    output_label_name,
+                    "Falling triangle",
+                    z_right,
+                    d,
+                    height,
+                    moment,
+                    f"({_format_num(d)} - z) / {_format_num(denominator)}",
+                    rf"\frac{{{_compact_num(d)} - z}}{{{_compact_num(denominator)}}}",
+                    coefficients,
+                )
+            )
+
+    total_area = sum(region["A"] for region in regions)
+    if total_area == 0.0:
+        return float((OUTPUT_LO + OUTPUT_HI) / 2.0), regions
+    total_moment = sum(region["M"] for region in regions)
+    return float(total_moment / total_area), regions
 
 
 def output_label(score):
@@ -211,16 +372,16 @@ def infer(inputs, rules=None):
         round(OUTPUT_LO + index * STEP, 4)
         for index in range(int((OUTPUT_HI - OUTPUT_LO) / STEP) + 1)
     ]
-    agg = _aggregate(xs, clip_heights)
-    score = _centroid(xs, agg)
+    score, regions = _composite_moment(clip_heights)
     return Trace(
         inputs=clamped,
         degrees=degrees,
         fired=fired,
         clip_heights=clip_heights,
         xs=xs,
-        agg=agg,
+        agg=[],
         score=score,
         label=output_label(score),
+        regions=regions,
         fired_detail=fired_detail,
     )
