@@ -39,9 +39,13 @@ adalah kasus khusus saat `b == c`. Parameter lengkap ada di
    nilai `α` (firing strength) tiap rule.
 3. **Implikasi** — himpunan output dipotong (*clipping*) pada nilai `α`
    menggunakan **MIN**.
-4. **Agregasi** — seluruh output rule digabung dengan **MAX**.
-5. **Defuzzifikasi** — hasil agregasi diubah menjadi skor crisp dengan metode
-   **centroid** (sampling step 0.1).
+4. **Komposisi** — tiap label output (Rendah / Sedang / Tinggi) mengambil `α`
+   tertinggi (**MAX**) dari semua rule yang menghasilkannya.
+5. **Defuzzifikasi** — metode **Composite Moment** `Z = ΣM / ΣA`: setiap
+   himpunan output terpotong didekomposisi menjadi bangun geometris (segitiga
+   naik, plateau, segitiga turun); luas `A` dan momen `M` dihitung **analitik**
+   (bukan sampling). Area yang saling tumpang tindih antar himpunan dihitung
+   terpisah per himpunan.
 6. **Penentuan label** — skor akhir dipetakan ke label dengan keanggotaan
    tertinggi (Rendah / Sedang / Tinggi).
 
@@ -83,7 +87,8 @@ sistem-seleksi-penerima-beasiswa-mamdani/
 │   ├── engine.py             # mesin inferensi Mamdani
 │   ├── ranking.py            # perangkingan & seleksi top-N (mode batch)
 │   ├── explain.py            # builder rumus LaTeX (show-your-work)
-│   ├── plots.py              # grafik membership & agregasi
+│   ├── derivation.py         # penjabaran defuzzifikasi Composite Moment
+│   ├── plots.py              # grafik membership & himpunan output terpotong
 │   └── report.py             # ekspor laporan PDF
 └── tests/                    # unit test (pytest)
 ```
@@ -136,10 +141,12 @@ Budi,2.4,6.5,1,3
 
 ## Laporan PDF
 
-Laporan PDF mereplikasi tampilan walkthrough web secara lengkap:
-definisi himpunan, rumus fuzzifikasi, rule yang menyala beserta `α`, plot
-keanggotaan, plot agregasi, dan rumus centroid — seluruh rumus dirender sebagai
-gambar (mathtext/Computer Modern) dengan skala seragam.
+Laporan PDF mereplikasi tampilan walkthrough web secara lengkap: definisi
+himpunan, rumus fuzzifikasi, rule yang menyala beserta `α`, plot keanggotaan,
+plot tiap himpunan output terpotong, dan penjabaran **Composite Moment** lengkap
+(komposisi MAX, pencarian titik potong, integral momen tiap region, rumus luas,
+hingga `ΣM / ΣA`) — seluruh rumus dirender sebagai gambar (mathtext/Computer
+Modern) dengan skala seragam.
 
 ---
 
