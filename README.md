@@ -6,6 +6,8 @@ seluruh proses perhitungan langkah demi langkah — fuzzifikasi, inferensi, agre
 hingga defuzzifikasi — lewat antarmuka web interaktif (Streamlit) dan dapat
 mengekspor laporan perhitungan ke PDF.
 
+**Demo langsung:** https://sistem-seleksi-beasiswa-mamdani-8hasyqmwvwyhrau7t2tsfs.streamlit.app/
+
 ---
 
 ## Variabel
